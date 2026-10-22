@@ -61,7 +61,18 @@ footer{font-size:12px;color:#8ea4b8;margin-top:18px}
 <button id="reset" class="secondary">↻ Main Semula</button>
 <button id="sound" class="secondary">Bunyi: ON</button>
 <footer>Kuning: Bandy · Merah: Komputer</footer>
-
+<div>
+  <p id="shotLabel">Pukulan: DRIVE</p>
+  <button id="driveBtn" onclick="pilihPukulan('drive')">
+    1 · Drive
+  </button>
+  <button id="volleyBtn" onclick="pilihPukulan('volley')">
+    2 · Volley
+  </button>
+  <button id="dinkBtn" onclick="pilihPukulan('dink')">
+    3 · Dink
+  </button>
+</div>
 <script>
 const canvas=document.getElementById("court");
 const c=canvas.getContext("2d");
@@ -130,12 +141,76 @@ function point(mine){
       :"Mata komputer. Cuba lagi—tekan Mula / Servis.";
   }
 }
-function hit(person,direction){
-  const offset=clamp((ball.x-person.x)/49,-1,1);
-  ball.vx=offset*290;
-  ball.vy=direction*Math.min(425,Math.abs(ball.vy)+13);
-  person.swing=1;
-  burst(ball.x,ball.y);pop();
+function hit(person,direction)let pukulan = "drive";
+
+const jenisPukulan = {
+  drive: {
+    nama: "DRIVE",
+    laju: 420,
+    sudut: 230,
+    warna: "#ffd166"
+  },
+  volley: {
+    nama: "VOLLEY",
+    laju: 350,
+    sudut: 330,
+    warna: "#ff8792"
+  },
+  dink: {
+    nama: "DINK",
+    laju: 185,
+    sudut: 110,
+    warna: "#79dbc3"
+  }
+};
+
+function pilihPukulan(jenis) {
+  if (!jenisPukulan[jenis]) return;
+
+  pukulan = jenis;
+  const pilihan = jenisPukulan[jenis];
+
+  document.getElementById("shotLabel").textContent =
+    "Pukulan: " + pilihan.nama;
+
+  for (const nama of Object.keys(jenisPukulan)) {
+    const butang = document.getElementById(nama + "Btn");
+    const dipilih = nama === jenis;
+
+    butang.style.background = dipilih
+      ? pilihan.warna
+      : "#263b50";
+
+    butang.style.color = dipilih ? "#142334" : "white";
+    butang.setAttribute("aria-pressed", String(dipilih));
+  }
+}
+
+function hit(person, direction) {
+  const offset = clamp((ball.x - person.x) / 49, -1, 1);
+
+  // Komputer memilih pukulan sendiri.
+  let jenis = pukulan;
+
+  if (person === cpu) {
+    const rawak = Math.random();
+    jenis = rawak < 0.5
+      ? "drive"
+      : rawak < 0.8 ? "volley" : "dink";
+  }
+
+  const pilihan = jenisPukulan[jenis];
+
+  ball.vx = offset * pilihan.sudut;
+  ball.vy = direction * pilihan.laju;
+
+  person.swing = 1;
+  burst(ball.x, ball.y);
+  pop();
+
+  message.textContent = person === player
+    ? "🏓 Bandy: " + pilihan.nama + "!"
+    : "Komputer: " + pilihan.nama + " — bersedia bro!";
 }
 function update(dt){
   clock+=dt;
@@ -309,7 +384,17 @@ document.getElementById("sound").onclick=function(){
   muted=!muted;
   this.textContent=muted?"Bunyi: OFF":"Bunyi: ON";
   if(!muted)enableAudio();
+  
 };
+  document.addEventListener("keydown", function(event) {
+  if (event.repeat) return;
+
+  if (event.key === "1") pilihPukulan("drive");
+  if (event.key === "2") pilihPukulan("volley");
+  if (event.key === "3") pilihPukulan("dink");
+});
+
+pilihPukulan("drive");
 requestAnimationFrame(frame);
 </script>
 </body>
