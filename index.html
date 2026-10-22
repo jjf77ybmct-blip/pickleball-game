@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bandy Pickleball</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 20px;
+    background: #101827;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+  }
+  h1 { color: #ffd166; margin-bottom: 10px; }
+  #skor { font-size: 24px; margin: 16px; }
+  canvas {
+    display: block;
+    width: 100%;
+    max-width: 420px;
+    margin: auto;
+    border: 4px solid white;
+    border-radius: 12px;
+    touch-action: none;
+  }
+  button {
+    margin: 16px 5px;
+    padding: 12px 22px;
+    background: #ffd166;
+    border: none;
+    border-radius: 10px;
+    font-size: 17px;
+    cursor: pointer;
+  }
+  p { line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<h1>🏓 Bandy Pickleball</h1>
+<p>Gerakkan tetikus atau seret jari.<br>
+Boleh juga guna kekunci ← dan →.</p>
+
+<div id="skor">Bandy 0 : 0 Komputer</div>
+<canvas id="gelanggang" width="420" height="600"></canvas>
+<p id="mesej" aria-live="polite">Tekan Mula untuk bermain!</p>
+
+<button id="mula">Mula / Servis</button>
+<button id="reset">Main Semula</button>
+
+<script>
+const canvas = document.getElementById("gelanggang");
+const ctx = canvas.getContext("2d");
+const skor = document.getElementById("skor");
+const mesej = document.getElementById("mesej");
+
+let pemain = 210;
+let komputer = 210;
+let mataSaya = 0;
+let mataKomputer = 0;
+let aktif = false;
+let tamat = false;
+let kiri = false;
+let kanan = false;
+let masaLalu = 0;
+
+const lebar = 82;
+const tinggi = 14;
+const bola = { x: 210, y: 300, vx: 130, vy: 270, r: 8 };
+
+function paparSkor() {
+  skor.textContent =
+    `Bandy ${mataSaya} : ${mataKomputer} Komputer`;
+}
+
+function sediaBola() {
+  bola.x = 210;
+  bola.y = 300;
+}
+
+function servis() {
+  if (aktif || tamat) return;
+  sediaBola();
+  bola.vx = (Math.random() - 0.5) * 220;
+  bola.vy = Math.random() < 0.5 ? 270 : -270;
+  aktif = true;
+  mesej.textContent = "Kejar bola, bro! 🏓";
+}
+
+function beriMata(untukSaya) {
+  aktif = false;
+  if (untukSaya) mataSaya++;
+  else mataKomputer++;
+
+  paparSkor();
+  sediaBola();
+
+  const cukupMata = Math.max(mataSaya, mataKomputer) >= 11;
+  const beza = Math.abs(mataSaya - mataKomputer);
+
+  if (cukupMata && beza >= 2) {
+    tamat = true;
+    mesej.textContent = mataSaya > mataKomputer
+      ? "🏆 Bandy menang! Mantap bro!"
+      : "Komputer menang. Cuba lagi bro! 💪";
+  } else {
+    mesej.textContent = untukSaya
+      ? "Mata untuk Bandy! Tekan Mula / Servis."
+      : "Mata komputer. Tekan Mula / Servis.";
+  }
+}
+
+function pantul(posisi, arah) {
+  const sudut = Math.max(-1, Math.min(1,
+    (bola.x - posisi) / (lebar / 2)
+  ));
+  bola.vx = sudut * 290;
+  bola.vy = arah * Math.min(440, Math.abs(bola.vy) + 12);
+}
+
+function kemasKini(dt) {
+  if (kiri) pemain -= 360 * dt;
+  if (kanan) pemain += 360 * dt;
+  pemain = Math.max(lebar / 2,
+    Math.min(420 - lebar / 2, pemain));
+
+  if (!aktif) return;
+
+  const sasaran = bola.vy < 0 ? bola.x : 210;
+  const beza = sasaran - komputer;
+  komputer += Math.sign(beza) * Math.min(Math.abs(beza), 175 * dt);
+  komputer = Math.max(lebar / 2,
+    Math.min(420 - lebar / 2, komputer));
+
+  const yLama = bola.y;
+  bola.x += bola.vx * dt;
+  bola.y += bola.vy * dt;
+
+  if (bola.x < bola.r) {
+    bola.x = bola.r;
+    bola.vx = Math.abs(bola.vx);
+  }
+  if (bola.x > 420 - bola.r) {
+    bola.x = 420 - bola.r;
+    bola.vx = -Math.abs(bola.vx);
+  }
+
+  // Paddle pemain: bahagian atas pada y = 550.
+  if (bola.vy > 0 &&
+      yLama + bola.r <= 550 &&
+      bola.y + bola.r >= 550 &&
+      Math.abs(bola.x - pemain) <= lebar / 2 + bola.r) {
+    bola.y = 550 - bola.r;
+    pantul(pemain, -1);
+  }
+
+  // Paddle komputer: bahagian bawah pada y = 50.
+  if (bola.vy < 0 &&
+      yLama - bola.r >= 50 &&
+      bola.y - bola.r <= 50 &&
+      Math.abs(bola.x - komputer) <= lebar / 2 + bola.r) {
+    bola.y = 50 + bola.r;
+    pantul(komputer, 1);
+  }
+
+  if (bola.y < -bola.r) beriMata(true);
+  else if (bola.y > 600 + bola.r) beriMata(false);
+}
+
+function lukis() {
+  ctx.fillStyle = "#167c69";
+  ctx.fillRect(0, 0, 420, 600);
+
+  ctx.fillStyle = "#245c96";
+  ctx.fillRect(20, 190, 380, 220);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.8)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(20, 20, 380, 560);
+
+  ctx.beginPath();
+  ctx.moveTo(20, 190);
+  ctx.lineTo(400, 190);
+  ctx.moveTo(20, 410);
+  ctx.lineTo(400, 410);
+  ctx.moveTo(210, 20);
+  ctx.lineTo(210, 190);
+  ctx.moveTo(210, 410);
+  ctx.lineTo(210, 580);
+  ctx.stroke();
+
+  ctx.setLineDash([8, 7]);
+  ctx.beginPath();
+  ctx.moveTo(0, 300);
+  ctx.lineTo(420, 300);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = "#ff7878";
+  ctx.fillRect(komputer - lebar / 2, 36, lebar, tinggi);
+
+  ctx.fillStyle = "#ffd166";
+  ctx.fillRect(pemain - lebar / 2, 550, lebar, tinggi);
+
+  ctx.fillStyle = "#eaff58";
+  ctx.beginPath();
+  ctx.arc(bola.x, bola.y, bola.r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function bingkai(masa) {
+  const dt = masaLalu ? Math.min((masa - masaLalu) / 1000, 0.025) : 0;
+  masaLalu = masa;
+  kemasKini(dt);
+  lukis();
+  requestAnimationFrame(bingkai);
+}
+
+function kawal(event) {
+  const kotak = canvas.getBoundingClientRect();
+  pemain = (event.clientX - kotak.left) * (420 / kotak.width);
+  pemain = Math.max(lebar / 2,
+    Math.min(420 - lebar / 2, pemain));
+}
+
+canvas.addEventListener("pointerdown", event => {
+  canvas.setPointerCapture(event.pointerId);
+  kawal(event);
+});
+
+canvas.addEventListener("pointermove", event => {
+  if (event.pointerType === "mouse" || event.buttons) kawal(event);
+});
+
+document.addEventListener("keydown", event => {
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+    event.preventDefault();
+    if (event.key === "ArrowLeft") kiri = true;
+    else kanan = true;
+  }
+});
+
+document.addEventListener("keyup", event => {
+  if (event.key === "ArrowLeft") kiri = false;
+  if (event.key === "ArrowRight") kanan = false;
+});
+
+window.addEventListener("blur", () => {
+  kiri = false;
+  kanan = false;
+});
+
+document.getElementById("mula").onclick = servis;
+
+document.getElementById("reset").onclick = () => {
+  aktif = false;
+  tamat = false;
+  mataSaya = 0;
+  mataKomputer = 0;
+  pemain = 210;
+  komputer = 210;
+  sediaBola();
+  paparSkor();
+  mesej.textContent = "Tekan Mula untuk bermain!";
+};
+
+requestAnimationFrame(bingkai);
+</script>
+</body>
+</html>
