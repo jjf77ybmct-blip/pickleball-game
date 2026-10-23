@@ -44,7 +44,7 @@ footer{font-size:12px;color:#8ea4b8;margin-top:18px}
   <small>BANDY PICKLEBALL CLUB</small>
   <h1>🏓 Court Challenge</h1>
   <div class="subtitle">
-    Gerakkan tetikus, seret jari atau guna ← →.<br>
+    Gerakkan tetikus / seret jari untuk maju, undur, kiri dan kanan.<br>Guna kekunci anak panah atau WASD · Dink jatuh dalam kitchen lawan.<br>
     Gaya arked · Setiap rali satu mata · Menang beza 2
   </div>
 </header>
@@ -80,7 +80,9 @@ const message=document.getElementById("message");
 const W=440,H=640;
 const player={x:220,y:566,swing:0};
 const cpu={x:220,y:74,swing:0};
-const ball={x:220,y:320,vx:0,vy:0,r:7};
+const ball={x:220,y:320,vx:0,vy:0,r:7,z:0,vz:0,bounces:0,lastHitter:null,targetX:220,targetY:270};
+const keys=new Set();
+let landing=null;
 let yourScore=0,cpuScore=0,active=false,finished=false;
 let left=false,right=false,last=0,clock=0;
 let particles=[],muted=false,audio;
@@ -90,7 +92,16 @@ function textScore(){
   document.getElementById("you").textContent=yourScore;
   document.getElementById("cpu").textContent=cpuScore;
 }
-function prepare(){ball.x=220;ball.y=320}
+function prepare(){
+  Object.assign(ball,{x:220,y:320,z:0,vz:0,vx:0,vy:0,bounces:0,lastHitter:null});
+  landing=null;
+}
+function launch(from,tx,ty,seconds){
+  ball.lastHitter=from;ball.bounces=0;
+  ball.targetX=tx;ball.targetY=ty;
+  ball.vx=(tx-ball.x)/seconds;ball.vy=(ty-ball.y)/seconds;
+  ball.vz=(200*seconds*seconds-ball.z)/seconds;
+}
 function enableAudio(){
   try{
     const A=window.AudioContext||window.webkitAudioContext;
@@ -120,8 +131,8 @@ function serve(){
   enableAudio();
   if(active||finished)return;
   prepare();
-  ball.vx=(Math.random()-.5)*200;
-  ball.vy=Math.random()<.5?265:-265;
+  ball.x=player.x;ball.y=player.y-30;ball.z=20;
+  launch(player,clamp(220+(Math.random()-.5)*180,55,385),120,1.35);
   active=true;
   message.textContent="Fokus bola, bro! 🏓";
 }
@@ -186,66 +197,73 @@ function pilihPukulan(jenis) {
   }
 }
 
-  function hit(person, direction) {
-  const offset = clamp((ball.x - person.x) / 49, -1, 1);
-
-  // Komputer memilih pukulan sendiri.
-  let jenis = pukulan;
-
-  if (person === cpu) {
-    const rawak = Math.random();
-    jenis = rawak < 0.5
-      ? "drive"
-      : rawak < 0.8 ? "volley" : "dink";
-  }
-
-  const pilihan = jenisPukulan[jenis];
-
-  ball.vx = offset * pilihan.sudut;
-  ball.vy = direction * pilihan.laju;
-
-  person.swing = 1;
-  burst(ball.x, ball.y);
-  pop();
-
-  message.textContent = person === player
-    ? "🏓 Bandy: " + pilihan.nama + "!"
-    : "Komputer: " + pilihan.nama + " — bersedia bro!";
+function hit(person, direction) {
+  let jenis=pukulan;
+  if(person===cpu)jenis=Math.random()<.55?"dink":"drive";
+  const option=jenisPukulan[jenis];
+  const offset=clamp((ball.x-person.x)/49,-1,1);
+  const tx=clamp(ball.x+offset*(jenis==="dink"?75:155),42,398);
+  const ty=jenis==="dink"?(direction<0?268:372):(direction<0?100:540);
+  const seconds=jenis==="dink"?Math.max(.75,Math.abs(ty-ball.y)/230):Math.max(.6,Math.abs(ty-ball.y)/option.laju);
+  launch(person,tx,ty,seconds);
+  person.swing=1;burst(ball.x,ball.y-ball.z);pop();
+  message.textContent=(person===player?"Bandy: ":"Komputer: ")+option.nama+(jenis==="dink"?" — sasaran kitchen!":"!");
 }
 function update(dt){
   clock+=dt;
   player.swing=Math.max(0,player.swing-dt*5);
   cpu.swing=Math.max(0,cpu.swing-dt*5);
-  if(left)player.x-=350*dt;
-  if(right)player.x+=350*dt;
-  player.x=clamp(player.x,65,375);
-
-  particles=particles.filter(p=>{
-    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
-    return p.life>0;
-  });
+  let dx=(keys.has("ArrowRight")||keys.has("d")?1:0)-(keys.has("ArrowLeft")||keys.has("a")?1:0);
+  let dy=(keys.has("ArrowDown")||keys.has("s")?1:0)-(keys.has("ArrowUp")||keys.has("w")?1:0);
+  const norm=Math.hypot(dx,dy)||1;
+  player.x=clamp(player.x+dx/norm*320*dt,55,385);
+  player.y=clamp(player.y+dy/norm*320*dt,354,586);
+  particles=particles.filter(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;return p.life>0;});
+  if(landing){landing.life-=dt;if(landing.life<=0)landing=null;}
   if(!active)return;
+  const receiving=ball.lastHitter===player;
+  const tx=receiving?ball.targetX:220;
+  const ty=receiving?clamp(ball.targetY-25,55,286):185;
+  const cx=tx-cpu.x,cy=ty-cpu.y,dist=Math.hypot(cx,cy)||1;
+  const step=Math.min(dist,245*dt);
+  cpu.x=clamp(cpu.x+cx/dist*step,55,385);
+  cpu.y=clamp(cpu.y+cy/dist*step,54,286);
 
-  const target=ball.vy<0?ball.x:220;
-  const d=target-cpu.x;
-  cpu.x+=Math.sign(d)*Math.min(Math.abs(d),160*dt);
-  cpu.x=clamp(cpu.x,65,375);
-
-  const oldY=ball.y;
-  ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
-  if(ball.x<31){ball.x=31;ball.vx=Math.abs(ball.vx)}
-  if(ball.x>409){ball.x=409;ball.vx=-Math.abs(ball.vx)}
-
-  if(ball.vy>0&&oldY+ball.r<=538&&ball.y+ball.r>=538&&
-    Math.abs(ball.x-player.x)<=49){
-    ball.y=538-ball.r;hit(player,-1);
+  // Small physics steps keep bounces and net crossings consistent.
+  const count=Math.max(1,Math.ceil(dt/.004));
+  const sub=dt/count;
+  for(let i=0;i<count&&active;i++){
+    const oldY=ball.y;
+    // Solve the exact time of the next ground contact.
+    const contact=(ball.vz+Math.sqrt(ball.vz*ball.vz+800*Math.max(0,ball.z)))/400;
+    const elapsed=Math.min(sub,contact);
+    ball.x+=ball.vx*elapsed;ball.y+=ball.vy*elapsed;
+    ball.z+=ball.vz*elapsed-200*elapsed*elapsed;ball.vz-=400*elapsed;
+    if((oldY-320)*(ball.y-320)<0&&ball.z<12){
+      point(ball.lastHitter===cpu);break;
+    }
+    if(ball.x<31){ball.x=31;ball.vx=Math.abs(ball.vx);}
+    if(ball.x>409){ball.x=409;ball.vx=-Math.abs(ball.vx);}
+    if(contact<=sub){
+      ball.z=0;ball.bounces++;
+      landing={x:ball.x,y:ball.y,life:.65};
+      const wrongSide=ball.lastHitter===player?ball.y>=320:ball.y<=320;
+      if(wrongSide){point(ball.lastHitter===cpu);break;}
+      if(ball.bounces>=2){point(ball.lastHitter===player);break;}
+      ball.vz=Math.abs(ball.vz)*.7;
+      ball.vx*=.82;ball.vy*=.82;
+    }
+    const receiver=ball.lastHitter===player?cpu:player;
+    const toward=receiver===player?ball.vy>0:ball.vy<0;
+    const paddleY=receiver.y+(receiver===player?-25:25);
+    const inKitchen=receiver===player?receiver.y<442:receiver.y>198;
+    // Automatic returns: wait for the bounce when standing in the kitchen.
+    if(toward&&ball.z<=43&&Math.abs(ball.x-receiver.x)<=43&&
+      Math.abs(ball.y-paddleY)<=22&&(!inKitchen||ball.bounces>0)){
+      hit(receiver,receiver===player?-1:1);
+    }
+    if(ball.y<-15)point(true);else if(ball.y>655)point(false);
   }
-  if(ball.vy<0&&oldY-ball.r>=102&&ball.y-ball.r<=102&&
-    Math.abs(ball.x-cpu.x)<=49){
-    ball.y=102+ball.r;hit(cpu,1);
-  }
-  if(ball.y<-15)point(true);
-  else if(ball.y>655)point(false);
 }
 function ellipse(x,y,rx,ry,color){
   c.fillStyle=color;c.beginPath();
@@ -321,13 +339,19 @@ function drawPerson(p,color,top){
   c.restore();
 }
 function drawBall(){
-  const lift=active?5+Math.abs(Math.sin(clock*7))*9:4;
-  ellipse(ball.x+5,ball.y+lift,8,4,"#0005");
-  ellipse(ball.x,ball.y,ball.r,ball.r,"#eaff53");
-  ellipse(ball.x-2,ball.y-2,2,2,"#ffffff99");
-  [[3,0],[-2,3],[0,-4]].forEach(([x,y])=>{
-    ellipse(ball.x+x,ball.y+y,1.1,1.1,"#718225");
-  });
+  if(active){
+    c.strokeStyle="#79dbc380";c.lineWidth=2;
+    c.beginPath();c.ellipse(ball.targetX,ball.targetY,12,6,0,0,Math.PI*2);c.stroke();
+  }
+  if(landing){
+    c.strokeStyle="#79dbc3";c.lineWidth=2;
+    c.beginPath();c.ellipse(landing.x,landing.y,12+(1-landing.life/.65)*15,7,0,0,Math.PI*2);c.stroke();
+  }
+  ellipse(ball.x+3,ball.y+4,8,4,"#0005");
+  const y=ball.y-ball.z;
+  ellipse(ball.x,y,ball.r,ball.r,"#eaff53");
+  ellipse(ball.x-2,y-2,2,2,"#ffffff99");
+  [[3,0],[-2,3],[0,-4]].forEach(([x,dy])=>ellipse(ball.x+x,y+dy,1.1,1.1,"#718225"));
 }
 function draw(){
   drawCourt();
@@ -354,7 +378,8 @@ function frame(t){
 }
 function move(e){
   const r=canvas.getBoundingClientRect();
-  player.x=clamp((e.clientX-r.left)*W/r.width,65,375);
+  player.x=clamp((e.clientX-r.left)*W/r.width,55,385);
+  player.y=clamp((e.clientY-r.top)*H/r.height+32,354,586);
 }
 canvas.addEventListener("pointerdown",e=>{
   canvas.setPointerCapture(e.pointerId);move(e);
@@ -363,20 +388,15 @@ canvas.addEventListener("pointermove",e=>{
   if(e.pointerType==="mouse"||e.buttons)move(e);
 });
 document.addEventListener("keydown",e=>{
-  if(e.key==="ArrowLeft"||e.key==="ArrowRight"){
-    e.preventDefault();
-    if(e.key==="ArrowLeft")left=true;else right=true;
-  }
+  const key=e.key.length===1?e.key.toLowerCase():e.key;
+  if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","w","a","s","d"].includes(key)){e.preventDefault();keys.add(key);}
 });
-document.addEventListener("keyup",e=>{
-  if(e.key==="ArrowLeft")left=false;
-  if(e.key==="ArrowRight")right=false;
-});
-window.addEventListener("blur",()=>{left=false;right=false});
+document.addEventListener("keyup",e=>keys.delete(e.key.length===1?e.key.toLowerCase():e.key));
+window.addEventListener("blur",()=>keys.clear());
 document.getElementById("start").onclick=serve;
 document.getElementById("reset").onclick=()=>{
   active=false;finished=false;yourScore=0;cpuScore=0;
-  player.x=cpu.x=220;player.swing=cpu.swing=0;
+  player.x=cpu.x=220;player.y=566;cpu.y=74;player.swing=cpu.swing=0;keys.clear();
   particles=[];prepare();textScore();
   message.textContent="Jom rematch! Tekan Mula / Servis.";
 };
@@ -395,7 +415,9 @@ document.getElementById("sound").onclick=function(){
 });
 
 pilihPukulan("drive");
+draw();
 requestAnimationFrame(frame);
 </script>
 </body>
 </html>
+
