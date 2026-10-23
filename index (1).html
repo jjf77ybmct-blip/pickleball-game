@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bandy Pickleball Club | Court Edition</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;padding:24px 14px;
+  background:radial-gradient(circle at top,#223b4e,#0b1320);
+  color:#eef6ff;font-family:Arial,sans-serif;text-align:center;
+}
+header{max-width:460px;margin:auto}
+small{color:#79dbc3;letter-spacing:3px;font-weight:bold}
+h1{font-size:30px;margin:10px 0;color:#ffd166}
+.subtitle{font-size:14px;color:#b5c5d6;line-height:1.6}
+.scoreboard{
+  display:flex;justify-content:space-around;align-items:center;
+  max-width:440px;margin:18px auto;padding:16px;
+  border:1px solid #ffffff20;border-radius:18px;background:#ffffff08;
+}
+.name{font-size:12px;letter-spacing:2px;color:#bbcadb}
+.score{font-size:38px;font-weight:bold;margin-top:5px}
+.you{color:#ffd166}.cpu{color:#ff8792}
+canvas{
+  display:block;width:100%;max-width:440px;margin:auto;
+  border-radius:20px;box-shadow:0 20px 60px #0007;
+  touch-action:none;
+}
+#message{min-height:40px;font-size:14px;color:#c9d8e6}
+button{
+  border:0;border-radius:12px;padding:13px 18px;margin:4px;
+  cursor:pointer;font-weight:bold;font-size:14px;
+  background:#ffd166;color:#142334;
+}
+.secondary{background:#ffffff12;color:white;border:1px solid #ffffff25}
+button:active{transform:scale(.97)}
+footer{font-size:12px;color:#8ea4b8;margin-top:18px}
+
+body{background:radial-gradient(ellipse at top,#243a40 0%,#101c22 55%,#080f14 100%);padding-top:30px}
+header{max-width:480px}
+small{color:#b2c5bf;letter-spacing:4px;font-size:10px}
+h1{font-size:27px;font-weight:800;letter-spacing:3px;color:#e9e4d7;margin:12px 0}
+.subtitle{font-size:12px;color:#9aadb2}
+.scoreboard{background:linear-gradient(120deg,#27363c,#16242a);border:1px solid #a5b8b42b;border-radius:10px;box-shadow:0 6px 25px #0004}
+.score{font-variant-numeric:tabular-nums;font-size:36px}
+.you{color:#dcc786}.cpu{color:#de8f82}
+canvas{border-radius:8px;border:1px solid #8caaa144;box-shadow:0 0 0 6px #111e22,0 24px 60px #0009}
+button{background:linear-gradient(#e0c887,#bea060);border-radius:7px;color:#18262a}
+.secondary{background:#243239;border-color:#7d96973a}
+#message{color:#aebebc;font-size:13px;margin-top:22px}
+footer{letter-spacing:1px;font-size:10px}
+</style>
+</head>
+<body>
+<header>
+  <small>BANDY PICKLEBALL CLUB</small>
+  <h1>COURT CHALLENGE</h1>
+  <div class="subtitle">
+    Gerakkan tetikus / seret jari untuk maju, undur, kiri dan kanan.<br>Guna kekunci anak panah atau WASD · Dink jatuh dalam kitchen lawan.<br>
+    Gaya arked · Setiap rali satu mata · Menang beza 2
+  </div>
+</header>
+
+<div class="scoreboard">
+  <div><div class="name">BANDY</div><div id="you" class="score you">0</div></div>
+  <div style="color:#8399ae">HINGGA 11</div>
+  <div><div class="name">KOMPUTER</div><div id="cpu" class="score cpu">0</div></div>
+</div>
+
+<canvas id="court" width="440" height="640"></canvas>
+<p id="message" aria-live="polite">Bersedia bro? Tekan Mula / Servis!</p>
+<button id="start">▶ Mula / Servis</button>
+<button id="reset" class="secondary">↻ Main Semula</button>
+<button id="sound" class="secondary">Bunyi: ON</button>
+<footer>Kuning: Bandy · Merah: Komputer</footer>
+<div>
+  <p id="shotLabel">Pukulan: DRIVE</p>
+  <button id="driveBtn" onclick="pilihPukulan('drive')">
+    1 · Drive
+  </button>
+  <button id="volleyBtn" onclick="pilihPukulan('volley')">
+    2 · Volley
+  </button>
+  <button id="dinkBtn" onclick="pilihPukulan('dink')">
+    3 · Dink
+  </button>
+</div>
+<script>
+const canvas=document.getElementById("court");
+const c=canvas.getContext("2d");
+const message=document.getElementById("message");
+const W=440,H=640;
+const player={x:220,y:566,swing:0};
+const cpu={x:220,y:74,swing:0};
+const ball={x:220,y:320,vx:0,vy:0,r:7,z:0,vz:0,bounces:0,lastHitter:null,targetX:220,targetY:270};
+const keys=new Set();
+let landing=null;
+let yourScore=0,cpuScore=0,active=false,finished=false;
+let left=false,right=false,last=0,clock=0;
+let particles=[],muted=false,audio;
+
+function clamp(n,a,b){return Math.max(a,Math.min(b,n))}
+function textScore(){
+  document.getElementById("you").textContent=yourScore;
+  document.getElementById("cpu").textContent=cpuScore;
+}
+function prepare(){
+  Object.assign(ball,{x:220,y:320,z:0,vz:0,vx:0,vy:0,bounces:0,lastHitter:null});
+  landing=null;
+}
+function launch(from,tx,ty,seconds){
+  ball.lastHitter=from;ball.bounces=0;
+  ball.targetX=tx;ball.targetY=ty;
+  ball.vx=(tx-ball.x)/seconds;ball.vy=(ty-ball.y)/seconds;
+  ball.vz=(200*seconds*seconds-ball.z)/seconds;
+}
+function enableAudio(){
+  try{
+    const A=window.AudioContext||window.webkitAudioContext;
+    if(!audio&&A)audio=new A();
+    if(audio&&audio.state==="suspended")audio.resume().catch(()=>{});
+  }catch(e){}
+}
+function pop(){
+  if(muted||!audio||audio.state!=="running")return;
+  const o=audio.createOscillator(),g=audio.createGain();
+  o.type="sine";
+  o.frequency.setValueAtTime(650,audio.currentTime);
+  o.frequency.exponentialRampToValueAtTime(170,audio.currentTime+.07);
+  g.gain.setValueAtTime(.1,audio.currentTime);
+  g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.09);
+  o.connect(g);g.connect(audio.destination);
+  o.start();o.stop(audio.currentTime+.1);
+}
+function burst(x,y){
+  for(let i=0;i<10;i++){
+    const a=Math.random()*Math.PI*2;
+    const speed=40+Math.random()*110;
+    particles.push({x,y,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,life:.35});
+  }
+}
+function serve(){
+  enableAudio();
+  if(active||finished)return;
+  prepare();
+  ball.x=player.x;ball.y=player.y-30;ball.z=20;
+  launch(player,clamp(220+(Math.random()-.5)*180,55,385),120,1.35);
+  active=true;
+  message.textContent="Fokus bola, bro! 🏓";
+}
+function point(mine){
+  active=false;
+  if(mine)yourScore++;else cpuScore++;
+  textScore();prepare();
+  finished=Math.max(yourScore,cpuScore)>=11&&
+    Math.abs(yourScore-cpuScore)>=2;
+  if(finished){
+    message.textContent=yourScore>cpuScore
+      ?"🏆 Bandy juara! Tekan Main Semula untuk bermain lagi."
+      :"Komputer menang. Rematch bro? 💪";
+  }else{
+    message.textContent=mine
+      ?"🔥 Mata Bandy! Tekan Mula / Servis."
+      :"Mata komputer. Cuba lagi—tekan Mula / Servis.";
+  }
+}
+let pukulan = "drive";
+
+const jenisPukulan = {
+  drive: {
+    nama: "DRIVE",
+    laju: 420,
+    sudut: 230,
+    warna: "#ffd166"
+  },
+  volley: {
+    nama: "VOLLEY",
+    laju: 350,
+    sudut: 330,
+    warna: "#ff8792"
+  },
+  dink: {
+    nama: "DINK",
+    laju: 185,
+    sudut: 110,
+    warna: "#79dbc3"
+  }
+};
+
+function pilihPukulan(jenis) {
+  if (!jenisPukulan[jenis]) return;
+
+  pukulan = jenis;
+  const pilihan = jenisPukulan[jenis];
+
+  document.getElementById("shotLabel").textContent =
+    "Pukulan: " + pilihan.nama;
+
+  for (const nama of Object.keys(jenisPukulan)) {
+    const butang = document.getElementById(nama + "Btn");
+    const dipilih = nama === jenis;
+
+    butang.style.background = dipilih
+      ? pilihan.warna
+      : "#263b50";
+
+    butang.style.color = dipilih ? "#142334" : "white";
+    butang.setAttribute("aria-pressed", String(dipilih));
+  }
+}
+
+function hit(person, direction) {
+  let jenis=pukulan;
+  if(person===cpu)jenis=Math.random()<.55?"dink":"drive";
+  const option=jenisPukulan[jenis];
+  const offset=clamp((ball.x-person.x)/49,-1,1);
+  const tx=clamp(ball.x+offset*(jenis==="dink"?75:155),42,398);
+  const ty=jenis==="dink"?(direction<0?268:372):(direction<0?100:540);
+  const seconds=jenis==="dink"?Math.max(.75,Math.abs(ty-ball.y)/230):Math.max(.6,Math.abs(ty-ball.y)/option.laju);
+  launch(person,tx,ty,seconds);
+  person.swing=1;burst(ball.x,ball.y-ball.z);pop();
+  message.textContent=(person===player?"Bandy: ":"Komputer: ")+option.nama+(jenis==="dink"?" — sasaran kitchen!":"!");
+}
+function update(dt){
+  clock+=dt;
+  player.swing=Math.max(0,player.swing-dt*5);
+  cpu.swing=Math.max(0,cpu.swing-dt*5);
+  let dx=(keys.has("ArrowRight")||keys.has("d")?1:0)-(keys.has("ArrowLeft")||keys.has("a")?1:0);
+  let dy=(keys.has("ArrowDown")||keys.has("s")?1:0)-(keys.has("ArrowUp")||keys.has("w")?1:0);
+  const norm=Math.hypot(dx,dy)||1;
+  player.x=clamp(player.x+dx/norm*320*dt,55,385);
+  player.y=clamp(player.y+dy/norm*320*dt,354,586);
+  particles=particles.filter(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;return p.life>0;});
+  if(landing){landing.life-=dt;if(landing.life<=0)landing=null;}
+  if(!active)return;
+  const receiving=ball.lastHitter===player;
+  const tx=receiving?ball.targetX:220;
+  const ty=receiving?clamp(ball.targetY-25,55,286):185;
+  const cx=tx-cpu.x,cy=ty-cpu.y,dist=Math.hypot(cx,cy)||1;
+  const step=Math.min(dist,245*dt);
+  cpu.x=clamp(cpu.x+cx/dist*step,55,385);
+  cpu.y=clamp(cpu.y+cy/dist*step,54,286);
+
+  // Small physics steps keep bounces and net crossings consistent.
+  const count=Math.max(1,Math.ceil(dt/.004));
+  const sub=dt/count;
+  for(let i=0;i<count&&active;i++){
+    const oldY=ball.y;
+    // Solve the exact time of the next ground contact.
+    const contact=(ball.vz+Math.sqrt(ball.vz*ball.vz+800*Math.max(0,ball.z)))/400;
+    const elapsed=Math.min(sub,contact);
+    ball.x+=ball.vx*elapsed;ball.y+=ball.vy*elapsed;
+    ball.z+=ball.vz*elapsed-200*elapsed*elapsed;ball.vz-=400*elapsed;
+    if((oldY-320)*(ball.y-320)<0&&ball.z<12){
+      point(ball.lastHitter===cpu);break;
+    }
+    if(ball.x<31){ball.x=31;ball.vx=Math.abs(ball.vx);}
+    if(ball.x>409){ball.x=409;ball.vx=-Math.abs(ball.vx);}
+    if(contact<=sub){
+      ball.z=0;ball.bounces++;
+      landing={x:ball.x,y:ball.y,life:.65};
+      const wrongSide=ball.lastHitter===player?ball.y>=320:ball.y<=320;
+      if(wrongSide){point(ball.lastHitter===cpu);break;}
+      if(ball.bounces>=2){point(ball.lastHitter===player);break;}
+      ball.vz=Math.abs(ball.vz)*.7;
+      ball.vx*=.82;ball.vy*=.82;
+    }
+    const receiver=ball.lastHitter===player?cpu:player;
+    const toward=receiver===player?ball.vy>0:ball.vy<0;
+    const paddleY=receiver.y+(receiver===player?-25:25);
+    const inKitchen=receiver===player?receiver.y<442:receiver.y>198;
+    // Automatic returns: wait for the bounce when standing in the kitchen.
+    if(toward&&ball.z<=43&&Math.abs(ball.x-receiver.x)<=43&&
+      Math.abs(ball.y-paddleY)<=22&&(!inKitchen||ball.bounces>0)){
+      hit(receiver,receiver===player?-1:1);
+    }
+    if(ball.y<-15)point(true);else if(ball.y>655)point(false);
+  }
+}
+function ellipse(x,y,rx,ry,color){
+  c.fillStyle=color;c.beginPath();
+  c.ellipse(x,y,rx,ry,0,0,Math.PI*2);c.fill();
+}
+function line(x1,y1,x2,y2,color,width){
+  c.strokeStyle=color;c.lineWidth=width;c.lineCap="round";
+  c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();
+}
+
+// Fixed surface grain is cached once so the court stays stable and light on phones.
+const surface=document.createElement("canvas");
+surface.width=W;surface.height=H;
+const sc=surface.getContext("2d");
+let grainSeed=319;
+function grainRandom(){grainSeed=(grainSeed*16807)%2147483647;return grainSeed/2147483647;}
+function buildSurface(){
+  sc.fillStyle="#344c45";sc.fillRect(0,0,W,H);
+  sc.fillStyle="#296b88";sc.fillRect(24,24,392,592);
+  sc.fillStyle="#386b75";sc.fillRect(24,216,392,208);
+  for(let i=0;i<25000;i++){
+    sc.fillStyle=i%2?"rgba(255,255,255,.035)":"rgba(0,0,0,.045)";
+    sc.fillRect(grainRandom()*W,grainRandom()*H,1,1);
+  }
+  const light=sc.createLinearGradient(0,0,W,H);
+  light.addColorStop(0,"rgba(255,238,201,.13)");
+  light.addColorStop(.6,"rgba(0,0,0,0)");
+  light.addColorStop(1,"rgba(0,0,0,.2)");
+  sc.fillStyle=light;sc.fillRect(0,0,W,H);
+}
+buildSurface();
+function drawCourt(){
+  c.drawImage(surface,0,0);
+  c.save();
+  c.shadowColor="#0007";c.shadowBlur=5;c.shadowOffsetX=2;c.shadowOffsetY=3;
+  c.strokeStyle="#e9e9df";c.lineWidth=3;c.strokeRect(24,24,392,592);
+  c.shadowBlur=0;c.shadowOffsetX=c.shadowOffsetY=0;
+  line(24,216,416,216,"#e9e9df",2.5);
+  line(24,424,416,424,"#e9e9df",2.5);
+  line(220,24,220,216,"#e9e9df",2.5);
+  line(220,424,220,616,"#e9e9df",2.5);
+  c.textAlign="center";c.fillStyle="#ffffff24";c.font="bold 10px Arial";
+  c.fillText("NON-VOLLEY ZONE",220,251);c.fillText("NON-VOLLEY ZONE",220,396);
+  c.save();c.translate(403,475);c.rotate(-Math.PI/2);
+  c.font="bold 10px Arial";c.fillStyle="#ffffff80";c.fillText("BANDY  •  PICKLEBALL CLUB",0,0);c.restore();
+  // Net shadow falls away from the upper-left floodlights.
+  c.fillStyle="#071d2960";c.beginPath();
+  c.moveTo(15,321);c.lineTo(425,321);c.lineTo(433,338);c.lineTo(23,338);c.closePath();c.fill();
+  c.fillStyle="#0b192dbb";c.fillRect(15,308,410,17);
+  for(let x=19;x<425;x+=5)line(x,310,x,325,"#8f9aa277",.6);
+  for(let y=312;y<=324;y+=4)line(15,y,425,y,"#9aa7b077",.6);
+  line(15,308,425,308,"#0004",5);
+  line(15,307,425,307,"#f1eee4",3);
+  line(15,324,425,324,"#606b71",1);
+  for(const x of [15,425]){
+    ellipse(x+3,331,7,3,"#0006");
+    line(x,301,x,330,"#18262b",7);
+    line(x-1,302,x-1,328,"#8a979b",2);
+    ellipse(x,301,3.5,2,"#b5bfc0");
+  }
+  c.restore();
+}
+function drawPerson(p,color,top){
+  const facing=top?1:-1;
+  const pace=active?Math.sin(clock*9+(top?1:0))*1.8:0;
+  c.save();c.translate(p.x,p.y);
+  c.save();c.translate(9,13);c.rotate(-.35);
+  ellipse(0,0,21,28,"#00000026");ellipse(0,1,16,22,"#00000024");c.restore();
+  // Legs and athletic shoes.
+  line(-8,8,-10,19+pace,"#b9815d",7);
+  line(8,8,11,19-pace,"#b9815d",7);
+  for(const [x,y] of [[-10,21+pace],[11,21-pace]]){
+    ellipse(x+2,y+2,6,10,"#0004");
+    ellipse(x,y,5.5,9,"#d9dfdf");
+    ellipse(x-1,y-2,4,6,"#f6f5eb");
+    line(x-3,y+2,x+3,y+2,"#7b878b",1.4);
+    line(x-2,y-4,x+2,y-4,"#b8bfc3",1);
+  }
+  ellipse(-8,8,9,10,"#192830");ellipse(8,8,9,10,"#192830");
+  const jersey=c.createLinearGradient(-20,-12,20,18);
+  jersey.addColorStop(0,top?"#ff9586":"#f6d97c");
+  jersey.addColorStop(.45,color);
+  jersey.addColorStop(1,top?"#823b3c":"#957636");
+  c.fillStyle=jersey;c.beginPath();
+  c.moveTo(-12,-15);c.quadraticCurveTo(-25,-8,-20,6);
+  c.lineTo(-15,13);c.quadraticCurveTo(0,17,15,13);
+  c.lineTo(20,6);c.quadraticCurveTo(25,-8,12,-15);c.closePath();c.fill();
+  line(-13,-7,-12,10,"#ffffff50",2);
+  line(13,-7,12,10,"#00000030",2);
+  c.fillStyle="#fff9";c.font="bold 7px Arial";c.textAlign="center";
+  c.fillText(top?"02":"01",0,6);
+  // Relaxed arm and racket arm with elbow bend.
+  line(-19,-1,-24,facing*11,"#9b684d",8);
+  line(-24,facing*11,-19,facing*20,"#cf9b76",6);
+  ellipse(-19,facing*20,4,5,"#ddb18a");
+  const px=27*(1-p.swing),py=facing*(22+6*p.swing);
+  line(18,-2,24,facing*10,"#b58160",8);
+  line(24,facing*10,px,py-facing*8,"#dcaa80",6);
+  line(24,facing*9,23,facing*13,"#eceee6",6);
+  ellipse(px,py-facing*7,4,5,"#d6a278");
+  // Graphite paddle face, rim, carbon weave and wrapped grip.
+  c.save();c.translate(px,py+facing*7);
+  c.rotate((top?-1:1)*(.25-p.swing*.8));
+  c.shadowColor="#0005";c.shadowBlur=3;c.shadowOffsetX=2;c.shadowOffsetY=3;
+  const face=c.createLinearGradient(-10,-16,10,16);
+  face.addColorStop(0,"#576269");face.addColorStop(.45,"#202c34");face.addColorStop(1,"#111820");
+  c.fillStyle=face;c.strokeStyle="#b0bab8";c.lineWidth=1.8;
+  c.beginPath();c.moveTo(-7,-15);c.quadraticCurveTo(-13,-14,-12,0);
+  c.quadraticCurveTo(-12,12,-5,14);c.lineTo(5,14);
+  c.quadraticCurveTo(12,12,12,0);c.quadraticCurveTo(13,-14,7,-15);c.closePath();c.fill();c.stroke();
+  c.shadowBlur=0;c.shadowOffsetX=c.shadowOffsetY=0;
+  c.save();c.clip();
+  for(let i=-30;i<30;i+=4){line(i,-18,i+30,18,"#c4d5d310",.8);line(i,18,i+30,-18,"#c4d5d310",.8);}
+  line(-9,7,9,-8,top?"#dc6554":"#c2b15e",3);
+  c.restore();
+  c.fillStyle="#e1e6e2";c.font="bold 6px Arial";c.textAlign="center";c.fillText("B",0,3);
+  const gripY=top?-22:22;
+  line(0,top?-14:14,0,gripY,"#1b2025",5);
+  for(let y=Math.min(gripY,top?-14:14);y<Math.max(gripY,top?-14:14);y+=2)line(-2,y,2,y+1,"#7d8487",.8);
+  c.restore();
+  // Neck, head, hair and sports visor.
+  ellipse(0,-11,6,8,"#ac7959");
+  const skin=c.createRadialGradient(-4,-18,1,0,-14,13);
+  skin.addColorStop(0,"#e8bd93");skin.addColorStop(1,"#ac7757");
+  ellipse(0,-16,10,12,skin);
+  ellipse(0,-22,10,5,"#282322");
+  ellipse(-4,-24,5,2.5,"#484039");
+  line(-9,-19,9,-19,top?"#492c31":"#eee4cd",4);
+  ellipse(0,-20+facing*5,10,3,top?"#8c4040":"#bda75a");
+  c.restore();
+}
+function drawBall(){
+  if(active){
+    c.strokeStyle="#79dbc380";c.lineWidth=2;
+    c.beginPath();c.ellipse(ball.targetX,ball.targetY,12,6,0,0,Math.PI*2);c.stroke();
+  }
+  if(landing){
+    c.strokeStyle="#79dbc3";c.lineWidth=2;
+    c.beginPath();c.ellipse(landing.x,landing.y,12+(1-landing.life/.65)*15,7,0,0,Math.PI*2);c.stroke();
+  }
+  ellipse(ball.x+3,ball.y+4,8,4,"#0005");
+  const y=ball.y-ball.z;
+  ellipse(ball.x,y,ball.r,ball.r,"#eaff53");
+  ellipse(ball.x-2,y-2,2,2,"#ffffff99");
+  [[3,0],[-2,3],[0,-4]].forEach(([x,dy])=>ellipse(ball.x+x,y+dy,1.1,1.1,"#718225"));
+}
+function draw(){
+  drawCourt();
+  drawPerson(cpu,"#c65d52",true);
+  drawPerson(player,"#d2af55",false);
+  drawBall();
+  for(const p of particles){
+    c.globalAlpha=Math.max(0,p.life/.35);
+    ellipse(p.x,p.y,2.5,2.5,"#fff4b0");
+  }
+  c.globalAlpha=1;
+  if(!active){
+    c.fillStyle="#081725d9";c.fillRect(85,284,270,64);
+    c.fillStyle="#fff";c.textAlign="center";
+    c.font="bold 17px Arial";
+    c.fillText(finished?"PERLAWANAN TAMAT":"SEDIA UNTUK SERVIS",220,311);
+    c.font="12px Arial";c.fillStyle="#ffd166";
+    c.fillText(finished?"Tekan Main Semula":"Tekan butang Mula / Servis",220,333);
+  }
+}
+function frame(t){
+  const dt=last?Math.min((t-last)/1000,.025):0;
+  last=t;update(dt);draw();requestAnimationFrame(frame);
+}
+function move(e){
+  const r=canvas.getBoundingClientRect();
+  player.x=clamp((e.clientX-r.left)*W/r.width,55,385);
+  player.y=clamp((e.clientY-r.top)*H/r.height+32,354,586);
+}
+canvas.addEventListener("pointerdown",e=>{
+  canvas.setPointerCapture(e.pointerId);move(e);
+});
+canvas.addEventListener("pointermove",e=>{
+  if(e.pointerType==="mouse"||e.buttons)move(e);
+});
+document.addEventListener("keydown",e=>{
+  const key=e.key.length===1?e.key.toLowerCase():e.key;
+  if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","w","a","s","d"].includes(key)){e.preventDefault();keys.add(key);}
+});
+document.addEventListener("keyup",e=>keys.delete(e.key.length===1?e.key.toLowerCase():e.key));
+window.addEventListener("blur",()=>keys.clear());
+document.getElementById("start").onclick=serve;
+document.getElementById("reset").onclick=()=>{
+  active=false;finished=false;yourScore=0;cpuScore=0;
+  player.x=cpu.x=220;player.y=566;cpu.y=74;player.swing=cpu.swing=0;keys.clear();
+  particles=[];prepare();textScore();
+  message.textContent="Jom rematch! Tekan Mula / Servis.";
+};
+document.getElementById("sound").onclick=function(){
+  muted=!muted;
+  this.textContent=muted?"Bunyi: OFF":"Bunyi: ON";
+  if(!muted)enableAudio();
+  
+};
+  document.addEventListener("keydown", function(event) {
+  if (event.repeat) return;
+
+  if (event.key === "1") pilihPukulan("drive");
+  if (event.key === "2") pilihPukulan("volley");
+  if (event.key === "3") pilihPukulan("dink");
+});
+
+pilihPukulan("drive");
+draw();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
+
+
