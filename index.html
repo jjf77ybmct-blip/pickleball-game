@@ -86,6 +86,8 @@ footer{letter-spacing:1px;font-size:10px}
   <button id="dinkBtn" onclick="pilihPukulan('dink')">
     3 · Dink
   </button>
+  <button id="smashBtn" onclick="pilihPukulan('smash')">4 · Smash</button>
+  <p id="shotHint" style="font-size:12px;color:#aebebc">Smash: pilih 4, tunggu bola tinggi di luar kitchen.</p>
 </div>
 <script>
 const canvas=document.getElementById("court");
@@ -108,10 +110,10 @@ function textScore(){
 }
 function prepare(){
   Object.assign(ball,{x:220,y:320,z:0,vz:0,vx:0,vy:0,bounces:0,lastHitter:null});
-  landing=null;
+  landing=null;ball.isSmash=false;
 }
 function launch(from,tx,ty,seconds){
-  ball.lastHitter=from;ball.bounces=0;
+  ball.lastHitter=from;ball.bounces=0;ball.isSmash=false;
   ball.targetX=tx;ball.targetY=ty;
   ball.vx=(tx-ball.x)/seconds;ball.vy=(ty-ball.y)/seconds;
   ball.vz=(200*seconds*seconds-ball.z)/seconds;
@@ -169,6 +171,7 @@ function point(mine){
 let pukulan = "drive";
 
 const jenisPukulan = {
+  smash: {nama:"SMASH",laju:800,sudut:270,warna:"#f4a261"},
   drive: {
     nama: "DRIVE",
     laju: 420,
@@ -211,17 +214,28 @@ function pilihPukulan(jenis) {
   }
 }
 
+function canSmash(person){
+  const outside=person===player?person.y>=442:person.y<=198;
+  return outside&&ball.z>=48&&ball.z<=100;
+}
 function hit(person, direction) {
   let jenis=pukulan;
-  if(person===cpu)jenis=Math.random()<.55?"dink":"drive";
+  if(person===cpu)jenis=canSmash(person)&&Math.random()<.4?"smash":(Math.random()<.55?"dink":"drive");
+  const requestedSmash=jenis==="smash";
+  if(requestedSmash&&!canSmash(person))jenis="drive";
   const option=jenisPukulan[jenis];
   const offset=clamp((ball.x-person.x)/49,-1,1);
   const tx=clamp(ball.x+offset*(jenis==="dink"?75:155),42,398);
   const ty=jenis==="dink"?(direction<0?268:372):(direction<0?100:540);
-  const seconds=jenis==="dink"?Math.max(.75,Math.abs(ty-ball.y)/230):Math.max(.6,Math.abs(ty-ball.y)/option.laju);
+  let seconds=jenis==="dink"?Math.max(.75,Math.abs(ty-ball.y)/230):Math.max(.6,Math.abs(ty-ball.y)/option.laju);
+  // A high contact and short flight produce a downward overhead smash.
+  if(jenis==="smash")seconds=Math.max(.22,Math.min(Math.abs(ty-ball.y)/800,Math.sqrt(ball.z/200)*.85));
   launch(person,tx,ty,seconds);
-  person.swing=1;burst(ball.x,ball.y-ball.z);pop();
-  message.textContent=(person===player?"Bandy: ":"Komputer: ")+option.nama+(jenis==="dink"?" — sasaran kitchen!":"!");
+  ball.isSmash=jenis==="smash";person.shot=jenis;
+  person.swing=1;burst(ball.x,ball.y);pop();
+  message.textContent=(person===player?"Bandy: ":"Komputer: ")+option.nama+
+    (jenis==="smash"?"! 💥":jenis==="dink"?" — sasaran kitchen!":
+      requestedSmash?" — bola rendah / dalam kitchen, guna drive.":"!");
 }
 function update(dt){
   clock+=dt;
@@ -234,6 +248,8 @@ function update(dt){
   player.y=clamp(player.y+dy/norm*320*dt,354,586);
   particles=particles.filter(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;return p.life>0;});
   if(landing){landing.life-=dt;if(landing.life<=0)landing=null;}
+  const hint=document.getElementById("shotHint");
+  if(hint)hint.textContent=pukulan==="smash"?(active&&ball.lastHitter===cpu&&canSmash(player)?"SMASH SEDIA! Dekati bola untuk pukul.":"Smash: tunggu bola tinggi, berdiri di luar kitchen. Bola rendah akan dibalas drive."):"Smash: tekan 4 / butang Smash untuk bola tinggi.";
   if(!active)return;
   const receiving=ball.lastHitter===player;
   const tx=receiving?ball.targetX:220;
@@ -272,7 +288,8 @@ function update(dt){
     const paddleY=receiver.y+(receiver===player?-25:25);
     const inKitchen=receiver===player?receiver.y<442:receiver.y>198;
     // Automatic returns: wait for the bounce when standing in the kitchen.
-    if(toward&&ball.z<=43&&Math.abs(ball.x-receiver.x)<=43&&
+    const overhead=(receiver===cpu||pukulan==="smash")&&canSmash(receiver);
+    if(toward&&(ball.z<=43||overhead)&&Math.abs(ball.x-receiver.x)<=43&&
       Math.abs(ball.y-paddleY)<=22&&(!inKitchen||ball.bounces>0)){
       hit(receiver,receiver===player?-1:1);
     }
@@ -483,6 +500,7 @@ document.getElementById("sound").onclick=function(){
   if (event.key === "1") pilihPukulan("drive");
   if (event.key === "2") pilihPukulan("volley");
   if (event.key === "3") pilihPukulan("dink");
+  if (event.key === "4") pilihPukulan("smash");
 });
 
 // Perspective renderer: physics coordinates remain unchanged.
@@ -556,9 +574,10 @@ function drawPerson(p,color,top){
   segment3([p.x-9,p.y,43],[p.x-12,p.y,58],'#ffffff55',1.6);
   const number=project(p.x,p.y,50);c.font=`bold ${8*number.s}px Arial`;c.textAlign='center';c.fillStyle='#fff9';c.fillText(top?'02':'01',number.x,number.y+2);
   // Shoulder / elbow / wrist articulation; racket arm swings across the body.
-  const swing=p.swing,wx=p.x+23*(1-swing),wy=p.y+face*(15+12*swing),wz=43+10*swing;
+  const swing=p.swing,overhead=p.shot==="smash"?swing:0;
+  const wx=p.x+23*(1-swing),wy=p.y+face*(15+12*swing),wz=43+10*swing+44*overhead;
   for(const side of [-1,1]){
-    const elbow=[p.x+side*21,p.y+face*5,45];
+    const elbow=[p.x+side*21,p.y+face*5,45+(side===1?35*overhead:0)];
     const wrist=side===1?[wx,wy,wz]:[p.x-18,p.y+face*12,35];
     segment3([p.x+side*14,p.y,57],elbow,shade,7);
     segment3([p.x+side*14-1,p.y,58],[elbow[0]-1,elbow[1],elbow[2]+1],skin,3.5);
@@ -582,6 +601,11 @@ function drawPerson(p,color,top){
   const visor=project(p.x,p.y+face*4,81);ellipse(visor.x,visor.y,9*visor.s,2.5*visor.s,top?'#6f3c3a':'#c4b077');
 }
 function drawBall(){
+  if(active&&ball.isSmash){
+    const tip=project(ball.x,ball.y,ball.z+5);
+    const tail=project(ball.x-ball.vx*.035,ball.y-ball.vy*.035,Math.max(0,ball.z-ball.vz*.035)+5);
+    c.save();c.globalAlpha=.55;line(tail.x,tail.y,tip.x,tip.y,"#ffb567",3);c.restore();
+  }
   if(landing){const p=project(landing.x,landing.y);c.strokeStyle='#b7ead8';c.lineWidth=1.5;c.beginPath();c.ellipse(p.x,p.y,(13+(1-landing.life/.65)*16)*p.s,6*p.s,0,0,Math.PI*2);c.stroke();}
   const ground=project(ball.x+5,ball.y+5),b=project(ball.x,ball.y,ball.z+5);
   ellipse(ground.x,ground.y,6*ground.s,3*ground.s,'#0006');
@@ -616,5 +640,6 @@ requestAnimationFrame(frame);
 </script>
 </body>
 </html>
+
 
 
